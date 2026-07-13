@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Family Health Intelligence Dashboard</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <!-- 1. CORE CHART.JS LIBRARY -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- 2. ANNOTATION PLUGIN LOADED BEFORE CODE EXECUTION -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@2.2.1"></script>
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans antialiased">
+
+    <!-- Header Navigation -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-50 px-6 py-2 flex justify-between items-center shadow-xs">
+        <div>
+            <h1 class="text-base font-bold tracking-tight text-slate-700 bg-slate-100 px-4 py-2 rounded-xl border border-slate-200">Family Health Intelligence Dashboard</h1>
+        </div>
+
+        <div class="flex items-center space-x-3">
+            <div id="profile-avatar" class="h-[30px] w-[30px] bg-slate-700 rounded-full flex items-center justify-center text-white font-black shadow-sm text-[12px] leading-none shrink-0 transition-transform">P1</div>
+            <div>
+                <div class="flex items-center h-[30px] space-x-3">
+                    <select id="profile-picker" onchange="switchProfile(this.value)" class="text-xl font-bold bg-transparent border-none text-slate-800 focus:outline-none pr-6 cursor-pointer font-sans tracking-tight">
+                        <option value="profile1">Profile 1</option>
+                        <option value="profile2">Profile 2</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="flex min-h-[calc(100vh-55px)]">
+        <!-- Sidebar Navigation Elements -->
+        <aside class="w-72 bg-white border-r border-slate-200 p-6 shrink-0 sticky top-[55px] self-start h-[calc(100vh-55px)] flex flex-col justify-between">
+            <div class="flex-1 min-h-0 overflow-y-auto pr-1">
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">Diagnostic Panels</label>
+                <nav class="space-y-1" id="panel-nav">
+                    <!-- JavaScript injected elements -->
+                </nav>
+            </div>
+
+            <!-- SECURE LOCAL COMPONENT UPLOAD BLOCK -->
+            <div class="border-t border-slate-100 pt-4 mt-4 bg-white">
+                <label class="w-full flex flex-col items-center justify-center px-4 py-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl shadow-xs tracking-wide uppercase font-bold text-xs cursor-pointer transition-colors group">
+                    <div class="flex items-center space-x-2">
+                        <svg class="w-4 h-4 text-emerald-600 transition-transform group-hover:-translate-y-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                        <span>Upload Metrics PDF</span>
+                    </div>
+                    <input type="file" id="pdf-metrics-uploader" accept="application/pdf" class="hidden" onchange="handleMetricsUpload(event)" />
+                </label>
+                <div id="upload-status" class="mt-2 text-[11px] font-semibold min-h-4 text-slate-400 leading-tight">Ready for private local processing.</div>
+            </div>
+        </aside>
+
+        <!-- Main Workspace -->
+        <main class="flex-1 p-8 space-y-8 max-w-7-xl mx-auto">
+            <div>
+                <h2 id="active-panel-title" class="text-2xl font-bold text-slate-800">Panel Analysis</h2>
+                <p id="active-panel-desc" class="text-sm text-slate-500">Select a diagnostic category to observe longitudinal baseline curves.</p>
+            </div>
+            <div id="charts-grid" class="grid grid-cols-1 md:grid-cols-2 gap-6"></div>
+        </main>
+    </div>
+
+    <script>
+        let pdfjsLib = null;
+        let currentActiveUser = "profile1";
+        let currentCategory = "sugar";
+        const chartInstances = [];
+        
+        const compositionKeys = [
+            "weight", "bmi", "score", "fatMass", "fatPct", "leanMass", "trunkFat", "armFat", "legFat", "trunkMuscle", "armMuscle", "legMuscle", "bodyAge", "bmr"
+        ];
+        
+        const compositionMetricMeta = {
+            weight: { name: "Total Weight", defaultUnit: "kg", defaultLow: { profile1: 60.0, profile2: 40.0 }, defaultHigh: { profile1: 75.0, profile2: 55.0 } },
+            bmi: { name: "Body Mass Index", defaultUnit: "kg/m²", defaultLow: { profile1: 18.5, profile2: 18.5 }, defaultHigh: { profile1: 25.0, profile2: 25.0 } },
+            score: { name: "Health Score", defaultUnit: null, defaultLow: { profile1: 75, profile2: 75 }, defaultHigh: { profile1: 100, profile2: 100 } },
+            fatPct: { name: "Body Fat Percentage", defaultUnit: "%", defaultLow: { profile1: 10.0, profile2: 18.0 }, defaultHigh: { profile1: 20.0, profile2: 28.0 } },
+            fatMass: { name: "Fat Mass", defaultUnit: "kg", defaultLow: { profile1: 8.0, profile2: 8.0 }, defaultHigh: { profile1: 15.0, profile2: 15.0 } },
+            leanMass: { name: "Lean Body Mass", defaultUnit: "kg", defaultLow: { profile1: 30.0, profile2: 30.0 }, defaultHigh: { profile1: 60.0, profile2: 60.0 } },
+            trunkFat: { name: "Trunk Fat Mass", defaultUnit: "kg", defaultLow: { profile1: 4.0, profile2: 4.0 }, defaultHigh: { profile1: 10.0, profile2: 10.0 } },
+            armFat: { name: "Segmental Arm Fat", defaultUnit: "kg", defaultLow: { profile1: 0.5, profile2: 0.5 }, defaultHigh: { profile1: 1.5, @profile2: 1.5 } },
+            legFat: { name: "Segmental Leg Fat", defaultUnit: "kg", defaultLow: { profile1: 1.5, profile2: 1.5 }, defaultHigh: { profile1: 3.5, profile2: 3.5 } },
+            trunkMuscle: { name: "Trunk Muscle Mass", defaultUnit: "kg", defaultLow: { profile1: 12.0, profile2: 12.0 }, defaultHigh: { profile1: 30.0, profile2: 30.0 } },
+            armMuscle: { name: "Segmental Arm Muscle", defaultUnit: "kg", defaultLow: { profile1: 2.5, profile2: 2.5 }, defaultHigh: { profile1: 4.5, profile2: 4.5 } },
+            legMuscle: { name: "Segmental Leg Muscle", defaultUnit: "kg", defaultLow: { profile1: 8.0, profile2: 8.0 }, defaultHigh: { profile1: 12.0, profile2: 12.0 } },
+            bodyAge: { name: "Calculated Body Age", defaultUnit: null, defaultLow: { profile1: 20, profile2: 20 }, defaultHigh: { profile1: 38, profile2: 38 } },
+            bmr: { name: "Basal Metabolic Rate", defaultUnit: "kcal", defaultLow: { profile1: 1200, profile2: 900 }, defaultHigh: { profile1: 2200, profile2: 2000 } }
+        };
+
+        const userNameAliases = {
+            profile1: ["nikhil", "nikhil harindranath", "nikhil h nath"],
+            profile2: ["anju", "anju s kumar", "anju kumar"]
+        };
+
+        // SANITIZED DATA POOLS - Starts entirely empty to protect PII
+        const profile1Store = JSON.parse(localStorage.getItem('profile1_data') || '{"dates":[],"weight":[],"bmi":[],"score":[],"fatMass":[],"fatPct":[],"leanMass":[],"trunkFat":[],"armFat":[],"legFat":[],"trunkMuscle":[],"armMuscle":[],"legMuscle":[],"bodyAge":[],"bmr":[]}');
+        const profile2Store = JSON.parse(localStorage.getItem('profile2_data') || '{"dates":[],"weight":[],"bmi":[],"score":[],"fatMass":[],"fatPct":[],"leanMass":[],"trunkFat":[],"armFat":[],"legFat":[],"trunkMuscle":[],"armMuscle":[],"legMuscle":[],"bodyAge":[],"bmr":[]}');
+
+        const profile1MedicalEngine = {
+            "sugar": {
+                title: "Blood Sugar & Diabetes", desc: "Longitudinal trends.",
+                metrics: [
+                    { name: "Fasting Glucose (mg/dL)", dates: [], values: [], lowRef: 70, highRef: 100 },
+                    { name: "Postprandial Glucose (mg/dL)", dates: [], values: [], lowRef: 70, highRef: 140 },
+                    { name: "HbA1c (%)", dates: [], values: [], lowRef: 4.0, highRef: 5.7 }
+                ]
+            },
+            "lipids": {
+                title: "Cardiac Risk Markers & Lipids", desc: "Lipid structures.",
+                metrics: [
+                    { name: "Total Cholesterol (mg/dL)", dates: [], values: [], lowRef: 0, highRef: 200 },
+                    { name: "LDL Cholesterol (mg/dL)", dates: [], values: [], lowRef: 0, highRef: 100 },
+                    { name: "Triglycerides (mg/dL)", dates: [], values: [], lowRef: 0, highRef: 150 },
+                    { name: "HDL Cholesterol (mg/dL)", dates: [], values: [], lowRef: 40, highRef: 60 }
+                ]
+            },
+            "liver": {
+                title: "Liver Function Test (LFT)", desc: "Enzymatic markers.",
+                metrics: [
+                    { name: "SGPT / ALT (U/L)", dates: [], values: [], lowRef: 0, highRef: 45 },
+                    { name: "SGOT / AST (U/L)", dates: [], values: [], lowRef: 0, highRef: 35 }
+                ]
+            },
+            "renal": {
+                title: "Renal Function & Electrolytes", desc: "Filtration and fluid balance.",
+                metrics: [
+                    { name: "Serum Creatinine (mg/dL)", dates: [], values: [], lowRef: 0.72, highRef: 1.18 },
+                    { name: "Uric Acid (mg/dL)", dates: [], values: [], lowRef: 4.2, highRef: 7.3 }
+                ]
+            },
+            "composition": { title: "Body Composition Vitals", desc: "Local smart tracking arrays.", metrics: [] }
+        };
+
+        const profile2MedicalEngine = {
+            "sugar": {
+                title: "Blood Sugar & Diabetes", desc: "Profile 2 glycemic tracking.",
+                metrics: [
+                    { name: "Fasting Glucose (mg/dL)", dates: [], values: [], lowRef: 70, highRef: 100 },
+                    { name: "Postprandial Glucose (mg/dL)", dates: [], values: [], lowRef: 70, highRef: 140 },
+                    { name: "HbA1c (%)", dates: [], values: [], lowRef: 4.0, highRef: 5.7 }
+                ]
+            },
+            "lipids": {
+                title: "Cardiac Risk Markers & Lipids", desc: "Lipid panels.",
+                metrics: [
+                    { name: "Total Cholesterol (mg/dL)", dates: [], values: [], lowRef: 0, highRef: 200 },
+                    { name: "Triglycerides (mg/dL)", dates: [], values: [], lowRef: 0, highRef: 150 },
+                    { name: "HDL Cholesterol (mg/dL)", dates: [], values: [], lowRef: 40, highRef: 60 }
+                ]
+            },
+            "liver": {
+                title: "Liver Function Test (LFT)", desc: "Enzymatic metabolic markers.",
+                metrics: [
+                    { name: "SGPT / ALT (U/L)", dates: [], values: [], lowRef: 0, highRef: 34 },
+                    { name: "SGOT / AST (U/L)", dates: [], values: [], lowRef: 0, highRef: 31 }
+                ]
+            },
+            "renal": {
+                title: "Renal Function & Electrolytes", desc: "Protein clearance maps.",
+                metrics: [
+                    { name: "Urine Protein Creatinine Ratio", dates: [], values: [], lowRef: 0, highRef: 0.20 },
+                    { name: "Serum Creatinine (mg/dL)", dates: [], values: [], lowRef: 0.55, highRef: 1.02 }
+                ]
+            },
+            "composition": { title: "Body Composition Vitals", desc: "Local smart tracking arrays.", metrics: [] }
+        };
+
+        function getActiveEngine() {
+            return currentActiveUser === "profile1" ? profile1MedicalEngine : profile2MedicalEngine;
+        }
+
+        function getActiveCompositionDb() {
+            return currentActiveUser === "profile1" ? profile1Store : profile2Store;
+        }
+
+        function saveLocalCache() {
+            localStorage.setItem(`${currentActiveUser}_data`, JSON.stringify(getActiveCompositionDb()));
+        }
+
+        function getMetricKey(metricName) {
+            return normalizeMetricName(metricName).replace(/\bmg dl\b|\bmmol l\b|\bg dl\b|\bu l\b|\bkg\b|\blb\b|\bng ml\b|\bpg ml\b|\bmm hr\b|\b%\b/g, '').replace(/\s+/g, ' ').trim();
+        }
+
+        function withMetricUnit(metricName, unit) {
+            if (!unit) return metricName.replace(/\s*\([^)]+\)/, '');
+            if (metricName.includes('(')) return metricName.replace(/\([^)]+\)/, `(${unit})`);
+            return `${metricName} (${unit})`;
+        }
+
+        function canonicalUnit(unit) {
+            if (!unit) return null;
+            const normalized = unit.toLowerCase().replace(/μ/g, 'u').replace(/µ/g, 'u').replace(/\s+/g, '').replace(/per/g, '/');
+            const aliases = { 'mg/dl': 'mg/dL', 'mmol/l': 'mmol/L', 'g/dl': 'g/dL', 'u/l': 'U/L', 'iu/l': 'IU/L', 'kcal': 'kcal', '%': '%', 'kg': 'kg', 'lb': 'lb' };
+            return aliases[normalized] || unit;
+        }
+
+        function normalizeFreeText(text) {
+            return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        }
+
+        function detectPatientFromText(text) {
+            const normalized = ` ${normalizeFreeText(text)} `;
+            const score = { profile1: 0, profile2: 0 };
+            Object.keys(userNameAliases).forEach(user => {
+                userNameAliases[user].forEach(alias => {
+                    const token = ` ${normalizeFreeText(alias)} `;
+                    if (token.trim().length > 0 && normalized.includes(token)) score[user] += 1;
+                });
+            });
+            if (score.profile1 === score.profile2) return null;
+            return score.profile1 > score.profile2 ? "profile1" : "profile2";
+        }
+
+        function parseDisplayDate(dateLabel) {
+            if (!dateLabel) return null;
+            const direct = new Date(dateLabel);
+            if (!Number.isNaN(direct.getTime())) return direct;
+            const parts = dateLabel.trim().split(/\s+/);
+            if (parts.length === 3) {
+                return new Date(`${parts[0]} ${parts[1]} ${parts[2]}`);
+            }
+            return null;
+        }
+
+        function formatDisplayDate(dateObj) {
+            return dateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+        }
+
+        function extractNumberNearAlias(text, aliases) {
+            for (const alias of aliases) {
+                const safeAlias = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const regexAfter = new RegExp(`${safeAlias}[\\s\\S]{0,120}?(-?\\d{1,4}(?:,\\d{3})*(?:\\.\\d+)?)`, 'i');
+                const match = text.match(regexAfter);
+                if (match && match[1] !== undefined) return Number(match[1].replace(/,/g, ''));
+            }
+            return null;
+        }
+
+        function extractReportDate(text) {
+            const match = text.match(/\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{4})\b/i);
+            return match ? new Date(`${match[1]} ${match[2]} ${match[3]}`) : new Date();
+        }
+
+        function upsertCompositionEntry(db, dateLabel, record) {
+            const existingIndex = db.dates.indexOf(dateLabel);
+            if (existingIndex === -1) {
+                db.dates.push(dateLabel);
+                compositionKeys.forEach(key => db[key].push(record[key] ?? null));
+            } else {
+                compositionKeys.forEach(key => {
+                    if (record[key] !== undefined && record[key] !== null) db[key][existingIndex] = record[key];
+                });
+            }
+            saveLocalCache();
+        }
+
+        async function readPdfText(file) {
+            if (!pdfjsLib) {
+                pdfjsLib = await import('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs');
+                pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs';
+            }
+            const bytes = new Uint8Array(await file.arrayBuffer());
+            const loadingTask = pdfjsLib.getDocument({ data: bytes });
+            const pdf = await loadingTask.promise;
+            let textOutput = "";
+            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum += 1) {
+                const page = await pdf.getPage(pageNum);
+                const content = await page.getTextContent();
+                textOutput += content.items.map(item => item.str).join(' ') + '\n';
+            }
+            return textOutput;
+        }
+
+        function setUploadStatus(message, tone) {
+            const status = document.getElementById('upload-status');
+            const tones = { neutral: 'text-slate-500', success: 'text-emerald-700', error: 'text-rose-700' };
+            status.className = `mt-2 text-[11px] font-semibold min-h-4 ${tones[tone] || tones.neutral}`;
+            status.innerText = message;
+        }
+
+        function extractBodyCompositionRecord(text) {
+            const aliases = { weight: ["weight"], bmi: ["bmi", "body mass index"], score: ["score", "health score"] };
+            const record = {};
+            compositionKeys.forEach(key => {
+                record[key] = extractNumberNearAlias(text, aliases[key] || [key]);
+            });
+            const parsedDate = extractReportDate(text);
+            return { dateObj: parsedDate, date: formatDisplayDate(parsedDate), record };
+        }
+
+        function appendClinicalMetric(engine, name, dateLabel, value) {
+            Object.keys(engine).forEach(pKey => {
+                engine[pKey].metrics.forEach(m => {
+                    if (m.name.toLowerCase().includes(name.toLowerCase())) {
+                        const idx = m.dates.indexOf(dateLabel);
+                        if (idx === -1) { m.dates.push(dateLabel); m.values.push(value); }
+                        else { m.values[idx] = value; }
+                    }
+                });
+            });
+        }
+
+        async function handleMetricsUpload(event) {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            setUploadStatus('Parsing secure parameters document locally...', 'neutral');
+
+            try {
+                const pdfText = await readPdfText(file);
+                const targetUser = detectPatientFromText(pdfText) || currentActiveUser;
+                const compositionData = extractBodyCompositionRecord(pdfText);
+
+                if (targetUser !== currentActiveUser) switchProfile(targetUser);
+
+                const compositionDb = getActiveCompositionDb();
+                upsertCompositionEntry(compositionDb, compositionData.date, compositionData.record);
+                
+                // Scan common standard clinical flags from text if found
+                ["Glucose", "HbA1c", "Cholesterol", "Triglycerides", "Creatinine", "Hemoglobin"].forEach(label => {
+                    const foundVal = extractNumberNearAlias(pdfText, [label.toLowerCase()]);
+                    if (foundVal !== null) appendClinicalMetric(getActiveEngine(), label, compositionData.date, foundVal);
+                });
+
+                selectCategory(currentCategory);
+                setUploadStatus(`Captured indicators for ${targetUser.toUpperCase()} on ${compositionData.date} into device storage.`, 'success');
+            } catch (err) {
+                setUploadStatus('Processing failed. Ensure PDF text is unencrypted.', 'error');
+            }
+            event.target.value = '';
+        }
+
+        function switchProfile(user) {
+            currentActiveUser = user;
+            currentCategory = "sugar";
+            const avatar = document.getElementById('profile-avatar');
+            avatar.innerText = user === "profile1" ? "P1" : "P2";
+            avatar.className = user === "profile1" ? "h-[30px] w-[30px] bg-slate-700 rounded-full flex items-center justify-center text-white font-black text-[12px]" : "h-[30px] w-[30px] bg-amber-700 rounded-full flex items-center justify-center text-white font-black text-[12px]";
+            selectCategory("sugar");
+        }
+
+        function syncCompositionMetrics() {
+            const db = getActiveCompositionDb();
+            const engine = getActiveEngine();
+            engine.composition.metrics = compositionKeys.map(key => {
+                const meta = compositionMetricMeta[key];
+                return {
+                    name: withMetricUnit(meta.name, meta.defaultUnit), dates: db.dates, values: db[key],
+                    lowRef: meta.defaultLow[currentActiveUser], highRef: meta.defaultHigh[currentActiveUser]
+                };
+            });
+        }
+
+        function renderNavigation() {
+            const nav = document.getElementById('panel-nav');
+            nav.innerHTML = '';
+            Object.keys(getActiveEngine()).forEach(key => {
+                const item = getActiveEngine()[key];
+                const button = document.createElement('button');
+                button.className = `w-full text-left px-4 py-2.5 rounded-lg text-sm font-semibold flex justify-between items-center ${key === currentCategory ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'} cursor-pointer`;
+                button.onclick = () => selectCategory(key);
+                button.innerHTML = `<span>${item.title}</span>`;
+                nav.appendChild(button);
+            });
+        }
+
+        function selectCategory(key) { currentCategory = key; renderNavigation(); renderCharts(); }
+
+        function renderCharts() {
+            const container = document.getElementById('charts-grid');
+            chartInstances.forEach(ins => ins.destroy());
+            chartInstances.length = 0;
+            container.innerHTML = '';
+
+            if (currentCategory === "composition") syncCompositionMetrics();
+            const activePanel = getActiveEngine()[currentCategory];
+            
+            document.getElementById('active-panel-title').innerText = activePanel.title;
+            document.getElementById('active-panel-desc').innerText = activePanel.desc;
+
+            if (!activePanel.metrics.length || activePanel.metrics[0].dates.length === 0) {
+                container.innerHTML = `<div class="col-span-2 text-center py-12 text-slate-400 font-medium text-sm">No local data points imported yet. Use the upload button below to populate curves.</div>`;
+                return;
+            }
+
+            activePanel.metrics.forEach((metric, index) => {
+                const card = document.createElement('div'); card.className = "bg-white border border-slate-200 rounded-2xl p-6 shadow-2xl flex flex-col justify-between";
+                const latestValue = metric.values[metric.values.length - 1];
+                const isOutOfRange = (metric.lowRef !== 0 && latestValue < metric.lowRef) || (latestValue > metric.highRef);
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-4 font-sans">
+                        <div><h3 class="font-bold text-slate-800 text-base mb-0.5">${metric.name}</h3><p class="text-xs text-slate-400 font-medium">Optimal Window: ${metric.lowRef} - ${metric.highRef}</p></div>
+                        <span class="text-xs font-black px-3 py-1.5 rounded-lg uppercase ${isOutOfRange ? 'text-rose-700 bg-rose-50 border border-rose-200' : 'text-emerald-700 bg-emerald-50 border border-emerald-200'}">
+                            Current Value: <span class="font-black text-sm">${latestValue !== null ? latestValue : 'N/A'}</span>
+                        </span>
+                    </div>
+                    <div class="relative w-full h-48"><canvas id="canvas-${index}"></canvas></div>
+                `;
+                container.appendChild(card);
+                const ctx = document.getElementById(`canvas-${index}`).getContext('2d');
+
+                const lineAnnotations = {
+                    lineLow: { type: 'line', yMin: metric.lowRef, yMax: metric.lowRef, borderColor: '#10b981', borderDash: [5, 5], borderWidth: 2 },
+                    lineHigh: { type: 'line', yMin: metric.highRef, yMax: metric.highRef, borderColor: '#10b981', borderDash: [5, 5], borderWidth: 2 }
+                };
+
+                const bgColors = metric.values.map(val => ((metric.lowRef !== 0 && val < metric.lowRef) || val > metric.highRef) ? 'rgba(253, 164, 175, 0.85)' : 'rgba(167, 243, 208, 0.85)');
+                const borderColors = metric.values.map(val => ((metric.lowRef !== 0 && val < metric.lowRef) || val > metric.highRef) ? '#f43f5e' : '#10b981');
+
+                chartInstances.push(new Chart(ctx, {
+                    type: currentCategory === "composition" ? 'line' : 'bar',
+                    data: { labels: metric.dates, datasets: [{ label: metric.name, data: metric.values, backgroundColor: bgColors, borderColor: borderColors, borderWidth: 1.5, tension: 0.15, barThickness: 26, skipNull: true }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, annotation: { annotations: lineAnnotations } } }
+                }));
+            });
+        }
+        selectCategory("sugar");
+    </script>
+</body>
+</html>
